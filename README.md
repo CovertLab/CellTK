@@ -1,6 +1,7 @@
 # CellTK
 
-Live-cell analysis toolkit.
+Live-cell analysis toolkit.  
+For the active development version with more functionality, please visit [here](https://github.com/braysia/CellTK).
 
 Image processing is simply an image conversion/transformation process.  
 CellTK has the following five major processes which all implement conversion between img and labels.
@@ -31,7 +32,7 @@ python celltk/command.py -i data/testimages0/CFP/img* -f constant_thres -p THRES
 python celltk/command.py -i data/testimages0/CFP/img* -l output/c1/img* -f run_lap track_neck_cut -o output/nuc
 ```
 
-___-i___ for images path, ___-l___ for labels path, ___-o___ for output directory, ___-f___ for function name from ___*operation.py___, ___-p___ for arguments to the function. 
+___-i___ for images path, ___-l___ for labels path, ___-o___ for an output directory, ___-f___ for a function name from ___*operation.py___ modules, ___-p___ for arguments to the function. 
    
 Note that, time-lapse files need to have file names in a sorted order.
 
