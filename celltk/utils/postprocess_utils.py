@@ -2,7 +2,8 @@ from skimage.measure._regionprops import _RegionProperties
 import numpy as np
 import scipy.ndimage as ndi
 from global_holder import holder
-
+from math import sqrt
+from filters import label
 
 
 class _RegionProperties2(_RegionProperties):
@@ -36,6 +37,24 @@ class _RegionProperties2(_RegionProperties):
     @property
     def cell_id(self):
         return self.label
+
+    @property
+    def minor_axis_length(self):
+        _, l2 = self.inertia_tensor_eigvals
+        return 4 * sqrt(max(l2, 0))
+
+    @property
+    def major_axis_length(self):
+        l1, _ = self.inertia_tensor_eigvals
+        return 4 * sqrt(max(l1, 0))
+
+    @property
+    def num_seg(self):
+        """
+        number of isolated segments
+        """
+        return np.max(label(self.image, connectivity=1))
+
 
 
 def regionprops(label_image, intensity_image=None, cache=True):

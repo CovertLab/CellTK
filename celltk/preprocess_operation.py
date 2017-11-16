@@ -8,12 +8,14 @@ from utils.preprocess_utils import resize_img
 from utils.preprocess_utils import histogram_matching, wavelet_subtraction_hazen
 from utils.filters import adaptive_thresh
 from utils.cp_functions import align_cross_correlation, align_mutual_information
-from scipy.ndimage import imread
+from utils.util import imread
 from glob import glob
 from utils.filters import interpolate_nan
 from scipy.optimize import minimize
 import logging
 from utils.global_holder import holder
+from utils.mi_align import calc_jitters_multiple, calc_crop_coordinates
+from utils.shading_correction import retrieve_ff_ref
 
 
 logger = logging.getLogger(__name__)
@@ -50,7 +52,7 @@ def n4_illum_correction(img, RATIO=1.5, FILTERINGSIZE=50):
     Takes some calculation time. It first calculates the background using adaptive_thesh.
     """
     bw = adaptive_thresh(img, R=RATIO, FILTERINGSIZE=FILTERINGSIZE)
-    img = homogenize_intensity_n4(img, -bw)
+    img = homogenize_intensity_n4(img, ~bw)
     return img
 
 
@@ -60,7 +62,7 @@ def n4_illum_correction_downsample(img, DOWN=2, RATIO=1.05, FILTERINGSIZE=50, OF
     fil = sitk.ShrinkImageFilter()
     cc = sitk.GetArrayFromImage(fil.Execute(sitk.GetImageFromArray(img), [DOWN, DOWN]))
     bw = adaptive_thresh(cc, R=RATIO, FILTERINGSIZE=FILTERINGSIZE/DOWN)
-    himg = homogenize_intensity_n4(cc, -bw)
+    himg = homogenize_intensity_n4(cc, ~bw)
     himg = cc - himg
     # himg[himg < 0] = 0
     bias = resize_img(himg, img.shape)
@@ -79,43 +81,14 @@ def align(img, CROP=0.05):
             inputs = holder.inputs
 
         img0 = imread(inputs[0])
-        shapes = img0.shape
 
         (ch, cw) = [int(CROP * i) for i in img0.shape]
         ch = None if ch == 0 else ch
         cw = None if cw == 0 else cw
 
-        img0 = img0[ch:-ch, cw:-cw]
-        mask = np.ones(img0.shape, np.bool)
-        store = [(0, 0)]
-        for path0, path1 in zip(inputs[:-1], inputs[1:]):
-            img0 = imread(path0)[ch:-ch, cw:-cw]
-            img1 = imread(path1)[ch:-ch, cw:-cw]
-
-            j0, j1, score0 = align_mutual_information(img0, img1, mask, mask)
-
-            """compare it to FFT based alignment and pick the higher mutual info.
-            align_mutual_information can often stack in a local solution.
-            """
-            from utils.mi_align import mutualinf, offset_slice
-            from utils.imreg import translation
-            jj1, jj0 = translation(img0, img1)
-            p2, p1 = offset_slice(img1, img0, jj1, jj0)
-            m2, m1 = offset_slice(mask, mask, jj1, jj0)
-            score1 = mutualinf(p1, p2, m1, m2)
-            if score1 > score0:
-                j0, j1 = jj0, jj1
-            store.append((store[-1][0] + j0, store[-1][1] + j1))
-
-        max_w = max(i[0] for i in store)
-        start_w = [max_w - i[0] for i in store]
-        size_w = min([shapes[1] + i[0] for i in store]) - max_w
-        max_h = max(i[1] for i in store)
-        start_h = [max_h - i[1] for i in store]
-        size_h = min([shapes[0] + i[1] for i in store]) - max_h
-        holder.align = [(hi, hi+size_h, wi, wi+size_w) for hi, wi in zip(start_h, start_w)]
+        jitters = calc_jitters_multiple(inputs, ch, cw)
+        holder.align = calc_crop_coordinates(jitters, img0.shape)
         logger.debug('holder.align set to {0}'.format(holder.align))
-
     jt = holder.align[holder.frame]
     logger.debug('Jitter: {0}'.format(jt))
     if img.ndim == 2:
@@ -184,3 +157,59 @@ def histogram_match(img, BINS=1000, QUANT=100, THRES=False):
     else:
         img = histogram_matching(img, holder.first_img, BINS, QUANT, THRES)
     return img
+
+
+def shading_correction(img,
+                       ch='DAPI',
+                       whiteurl='http://archive.simtk.org/ktrprotocol/temp/ffref_20x3bin.npz',
+                       darkurl='http://archive.simtk.org/ktrprotocol/temp/ffdarkref_20x3bin.npz'):
+
+    """only access if it has not"""
+    if hasattr(holder, 'sc_ref'):
+        if ch in holder.sc_ref:
+            ref = holder.sc_ref[ch]
+            darkref = holder.sc_dref[ch]
+        else:
+            ref, darkref = retrieve_ff_ref(whiteurl, darkurl)
+            holder.sc_ref[ch] = ref
+            holder.sc_dref[ch] = darkref
+    else:
+        ref, darkref = retrieve_ff_ref(whiteurl, darkurl)
+        holder.sc_ref, holder.sc_dref = {}, {}
+        holder.sc_ref[ch] = ref
+        holder.sc_dref[ch] = darkref
+
+    def correct_shade(img, ref, darkref, ch):
+        img = img.astype(np.float)
+        d0 = img.astype(np.float) - darkref[ch]
+        d1 = ref[ch] - darkref[ch]
+        d1[d1 < 0] = 0
+        return d1.mean() * d0/d1
+
+    img = correct_shade(img, ref, darkref, ch)
+    return img
+
+
+def background_subtraction_wavelet(img, level=7, OFFSET=10):
+    '''
+    It might be radical but works in many cases in terms of segmentation.
+    Use "background_subtraction_wavelet_hazen" for a proper implementation.
+    '''
+    from pywt import WaveletPacket2D
+    from skimage.transform import resize
+    def wavelet_subtraction(img, level):
+        """6- 7 level is recommended"""
+        if level == 0:
+            return img
+        wp = WaveletPacket2D(data=img.astype(np.uint16), wavelet='haar', mode='sym')
+        back = resize(np.array(wp['a'*level].data), img.shape, order=3, mode='reflect')/(2**level)
+        img = img - back
+        return img
+    img = wavelet_subtraction(img, level)
+    return convert_positive(img, OFFSET)
+
+
+def np_arithmetic(img, npfunc='max'):
+    func = getattr(np, npfunc)
+    return func(img, axis=2)
+
