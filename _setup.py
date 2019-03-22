@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="celltk",
-    version="0.4",
+    version="2.0",
     packages=find_packages(),
     author='Takamasa Kudo',
     author_email='kudo@stanford.edu',

@@ -5,7 +5,7 @@ import numpy as np
 from utils.preprocess_utils import homogenize_intensity_n4
 from utils.preprocess_utils import convert_positive, estimate_background_prc
 from utils.preprocess_utils import resize_img
-from utils.preprocess_utils import histogram_matching, wavelet_subtraction_hazen
+from utils.preprocess_utils import histogram_matching, wavelet_subtraction_hazen, rolling_ball_subtraction_hazen
 from utils.filters import adaptive_thresh
 from utils.cp_functions import align_cross_correlation, align_mutual_information
 from utils.util import imread
@@ -16,16 +16,22 @@ import logging
 from utils.global_holder import holder
 from utils.mi_align import calc_jitters_multiple, calc_crop_coordinates
 from utils.shading_correction import retrieve_ff_ref
-
+from scipy.ndimage.filters import gaussian_filter
 
 logger = logging.getLogger(__name__)
 np.random.seed(0)
 
 
-def gaussian_laplace(img, SIGMA=2.5, NEG=False):
+def gaussian_blur(img, SIGMA=3):
+    img = gaussian_filter(img, sigma=SIGMA)
+    return img
+
+
+def gaussian_laplace(img, SIGMA=2.5, NEG=False, OFFSET=0):
     if NEG:
         img = -calc_lapgauss(img, SIGMA)
         img[img < 0 ] = 0
+        img += OFFSET
         return img
     return calc_lapgauss(img, SIGMA)
 
@@ -41,7 +47,15 @@ def curvature_anisotropic_smooth(img, NITER=10):
 def background_subtraction_wavelet_hazen(img, THRES=100, ITER=5, WLEVEL=6, OFFSET=50):
     """Wavelet background subtraction.
     """
-    back = wavelet_subtraction_hazen(img, ITER=ITER, THRES=THRES, WLEVEL=WLEVEL)
+    back = wavelet_subtraction_hazen(img.astype(np.float), ITER=ITER, THRES=THRES, WLEVEL=WLEVEL)
+    img = img - back
+    return convert_positive(img, OFFSET)
+
+
+def rolling_ball(img, RADIUS=100, SIGMA=3, OFFSET=50):
+    """Rolling ball background subtraction.
+    """
+    back = rolling_ball_subtraction_hazen(img.astype(np.float), RADIUS)
     img = img - back
     return convert_positive(img, OFFSET)
 
@@ -97,12 +111,11 @@ def align(img, CROP=0.05):
         return img[jt[0]:jt[1], jt[2]:jt[3], :]
 
 
-
 def flatfield_references(img, ff_paths=['Pos0/img00.tif', 'Pos1/img01.tif'], exp_corr=False):
     """
     Use empty images for background subtraction and illumination bias correction.
     Given multiple reference images, it will calculate median profile and use it for subtraction.
-    If flatfield image has the same illumination pattern but different exposure to the img,  
+    If flatfield image has the same illumination pattern but different exposure to the img,
     turning on bg_align would calculate correction factor.
 
     ff_paths (str or List(str)): image path for flat fielding references.
@@ -213,3 +226,34 @@ def np_arithmetic(img, npfunc='max'):
     func = getattr(np, npfunc)
     return func(img, axis=2)
 
+
+def stitch_images(img, POINTS=[(0,0),(0,0),(0,0),(0,0)]):
+    from utils.stitch_utils import relative_position, stitching
+    '''
+    Stitch images with 'Fiji/Stitch_image_Grid_Sequence' results.
+    '''
+    rp = relative_position(POINTS)
+    img = stitching(img, rp)
+    img = np_arithmetic(img, 'max')
+    return img
+
+
+def deep_unet(img, weight_path, region=1):
+    """ Generates a probability map of cells using the UNet algorithm. 
+
+    Args:
+        img (numpy.ndarray): image that will be segmented 
+        weight_path (string): path to weights file in .hdf5 format, can either bea local path or url. 
+        region (int): determines if each image will be saved individually (region =1) or 
+            setting region as None will save a stack of float32 images.
+    Returns:
+        pimg (numpy.ndarray): probability map image 
+        
+    """
+    from utils.unet_predict import predict
+    from utils.file_io import LocalPath
+    from utils.global_holder import holder
+    with LocalPath(weight_path) as wpath:
+        pimg = predict(holder.path, wpath)
+    pimg = np.moveaxis(pimg, 0, -1)
+    return pimg[:, :, region]

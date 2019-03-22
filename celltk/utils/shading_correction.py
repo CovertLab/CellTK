@@ -7,6 +7,7 @@ import shutil
 from os.path import join
 import os
 from util import imread
+#from utils.util import imread
 from glob import glob
 import tifffile as tiff
 
@@ -32,7 +33,7 @@ def correct_shade(img, ref, darkref, ch):
     d0 = img.astype(np.float) - darkref[ch]
     d1 = ref[ch] - darkref[ch]
     return d1.mean() * d0/d1
-    
+
 
 def shading_correction_folder(inputfolder, outputfolder, binning=3, magnification=20):
     """
@@ -45,14 +46,20 @@ def shading_correction_folder(inputfolder, outputfolder, binning=3, magnificatio
     parentfolder = inputfolder
     for dirname, subdirlist, filelist in os.walk(parentfolder):
         if 'metadata.txt' in filelist:
-            outputdir = join(outputfolder, dirname.split(parentfolder)[-1])
+            sfol_name = dirname.split(parentfolder)[-1]
+            sfol_name = sfol_name if not sfol_name.startswith('/') else sfol_name[1:]
+            outputdir = join(outputfolder, sfol_name)
             if not os.path.exists(outputdir):
                 os.makedirs(outputdir)
             with open(join(dirname, 'metadata.txt')) as mfile:
                 data = json.load(mfile)
                 channels = data['Summary']['ChNames']
             for chnum, ch in enumerate(channels):
-                pathlist = glob(join(dirname, '*channel{0:03d}*'.format(chnum)))            
+                pathlist = glob(join(dirname, '*channel{0:03d}*'.format(chnum)))
                 for path in pathlist:
-                    img = correct_shade(imread(path), ref, darkref, ch)
+                    try:
+                        img = correct_shade(imread(path), ref, darkref, ch)
+                    except:
+                        print "ch might not exist as a reference."
+                        img = imread(path)
                     tiff.imsave(join(outputdir, os.path.basename(path)), img.astype(np.float32))

@@ -10,9 +10,35 @@ class _RegionProperties2(_RegionProperties):
     parent = None
     nxt = None
 
+    def __init__(self, slice, label, label_image, intensity_image,
+                 cache_active):
+
+        if intensity_image is not None:
+            if not intensity_image.shape == label_image.shape:
+                raise ValueError('Label and intensity image must have the'
+                                 'same shape.')
+
+        self.label = label
+
+        self._slice = slice
+        self.slice = slice
+        self._label_image = label_image
+        self._intensity_image = intensity_image
+
+        self._cache_active = cache_active
+        self._cache = {}
+        self._ndim = label_image.ndim
+        # Note: in PR 2603, we added support for nD moments in regionprops.
+        # Many properties used xy coordinates, instead of rc. This attribute
+        # helps with the deprecation process and should be removed in 0.16.
+        self._use_xy_warning = True
+        self._transpose_moments = True
+
+
+
     @property
     def total_intensity(self):
-        return np.sum(self.intensity_image[self.image])
+        return np.sum(self.intensity_image[self.image]).astype(np.float)
 
     @property
     def x(self):
@@ -24,15 +50,15 @@ class _RegionProperties2(_RegionProperties):
 
     @property
     def median_intensity(self):
-        return np.median(self.intensity_image[self.image])
+        return np.median(self.intensity_image[self.image]).astype(np.float)
 
     @property
     def std_intensity(self):
-        return np.std(self.intensity_image[self.image])
+        return np.std(self.intensity_image[self.image]).astype(np.float)
 
     @property
     def cv_intensity(self):
-        return self.std_intensity/self.mean_intensity
+        return (self.std_intensity/self.mean_intensity).astype(np.float)
 
     @property
     def cell_id(self):
@@ -55,11 +81,8 @@ class _RegionProperties2(_RegionProperties):
         """
         return np.max(label(self.image, connectivity=1))
 
-
-
 def regionprops(label_image, intensity_image=None, cache=True):
     label_image = np.squeeze(label_image)
-
     if label_image.ndim not in (2, 3):
         raise TypeError('Only 2-D and 3-D images supported.')
 
@@ -74,9 +97,7 @@ def regionprops(label_image, intensity_image=None, cache=True):
             continue
 
         label = i + 1
-
-        props = _RegionProperties2(sl, label, label_image, intensity_image,
-                                  cache)
+        props = _RegionProperties2(sl, label, label_image, intensity_image, cache)
         regions.append(props)
 
     return regions
@@ -93,3 +114,32 @@ class Cell(object):
         self.coords = regionprop.coords
         self.abs_id = holder.count()
         self.centroid = regionprop.centroid
+
+
+class LCell(object):
+    def __init__(self, regionprop):
+        for p in ['area', 'num_seg', 'median_intensity', 'total_intensity', 'x', 'y', 'cell_id', 'label']:
+            setattr(self, p, getattr(regionprop, p))
+        self.abs_id = holder.count()
+        self._original_label = self.label
+        self.nxt = None
+        self.parent = None
+
+# class LCell(object):
+#     def __init__(self, regionprop):
+#         self._labels = ['area', 'num_seg', 'median_intensity', 'total_intensity', 'x', 'y', 'cell_id', 'label']
+#         self._data = np.zeros(len(self._labels))
+#         for num, p in enumerate(self._labels):
+#             self._data[num] = getattr(regionprop, p)
+#         self.parent = None
+#         self.nxt =None
+    
+#     def __getattr__(self, name):
+#         if name in self._labels:
+#             return self._data[self._labels.index(name)]
+#         super(LCell, self).__getattr__(name)
+
+#     def __setattr__(self, name, value):
+#         object.__setattr__(self, name, value)
+#         if name in self._labels:
+#             self._data[self._labels.index(name)] = value

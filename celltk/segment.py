@@ -22,10 +22,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-radius = [3, 50]
+radius = [3, 100]
 
 
-def clean_labels(labels, rad, OPEN=2):
+def clean_labels(labels, rad, OPEN=3):
     """default cleaning. Fill holes, remove small and large objects and opening.
     """
     labels = gray_fill_holes(labels)
@@ -42,6 +42,7 @@ def caller(inputs, output, functions, params):
     logger.info("Functions {0} for {1} images.".format(functions, len(inputs)))
 
     for holder.frame, path in enumerate(inputs):
+        holder.path = path
         img = imread(path)
         for function, param in zip(functions, params):
             func = getattr(segment_operation, function)
@@ -59,11 +60,10 @@ def main():
     parser.add_argument("-o", "--output", help="output directory",
                         type=str, default='temp')
     parser.add_argument("-f", "--functions", help="functions", nargs="*", default=None)
-    parser.add_argument("-p", "--param", nargs="*", help="parameters", default=[])
+    parser.add_argument('-p', '--param', nargs='+', help='parameters', action='append')
     args = parser.parse_args()
 
     params = ParamParser(args.param).run()
-
     if args.functions is None:
         print help(segment_operation)
         return

@@ -79,3 +79,5 @@ def lap_peak_local(img, separation=10, percentile=64, min_sigma=2, max_sigma=5, 
         return temp
     bw = mark_pos(img, coords)
     return label(binary_dilation(bw, np.ones((3, 3))))
+
+

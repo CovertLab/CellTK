@@ -14,9 +14,11 @@ def gap_closing(cells, DISPLACEMENT=100, MASSTHRES=0.15, maxgap=4):
     trhandler = TracesController(traces)
 
     # make sure not to have a cell as both disappered and appeared cells
+    store_singleframe = []
     for trace in trhandler.traces[:]:
         if len(trace) < 2:
             trhandler.traces.remove(trace)
+            store_singleframe.append(trace)
     dist = trhandler.pairwise_dist()
     massdiff = trhandler.pairwise_mass()
     framediff = trhandler.pairwise_frame()
@@ -27,7 +29,6 @@ def gap_closing(cells, DISPLACEMENT=100, MASSTHRES=0.15, maxgap=4):
     withinarea_inframe = withinarea * inframe * inmass
     # CHECK: distance as a fine cost
     withinarea_inframe = one_to_one_assignment(withinarea_inframe, dist)
-
     if withinarea_inframe.any():
         disapp_idx, app_idx = np.where(withinarea_inframe)
 
@@ -42,6 +43,8 @@ def gap_closing(cells, DISPLACEMENT=100, MASSTHRES=0.15, maxgap=4):
             dis_trace = [i for i in trhandler.traces if dis_cell in i][0]
             app_trace = [i for i in trhandler.traces if app_cell in i][0]
             dis_trace.extend(trhandler.traces.pop(trhandler.traces.index(app_trace)))
+
+    traces = traces + store_singleframe
     traces = label_traces(trhandler.traces)
     return convert_traces_to_storage(traces)
 
@@ -54,8 +57,6 @@ def cut_short_traces(cells, minframe=4):
         print "minframe set to the maximum"
         minframe = max([i.frame for i in cells])
 
-    traces = construct_traces_based_on_next(cells)
-
     '''handle division'''
     def list_parent_daughters(cells):
         cc = [(i.parent, i.label) for i in cells if i.parent is not None]
@@ -67,13 +68,13 @@ def cut_short_traces(cells, minframe=4):
             store.append([pt] + daughters)
         return store
     pdsets = list_parent_daughters(cells)
+    traces = construct_traces_based_on_next(cells)
     for pdset in pdsets:
         p0 = traces.pop([n for n, i in enumerate(traces) if pdset[0] == i[-1].label][0])
         d0 = traces.pop([n for n, i in enumerate(traces) if pdset[1] == i[0].label][0])
         d1 = traces.pop([n for n, i in enumerate(traces) if pdset[2] == i[0].label][0])
         traces.append(p0 + d0)
         traces.append(p0 + d1)
-
     ''' Calculate the largest frame differences so it will go well with gap closing'''
     store = []
     for trace in traces:
@@ -88,9 +89,11 @@ def detect_division(cells, DISPLACEMENT=50, maxgap=4, DIVISIONMASSERR=0.15):
     '''
     traces = construct_traces_based_on_next(cells)
     trhandler = TracesController(traces)
+    store_singleframe = []
     for trace in trhandler.traces[:]:
         if len(trace) < 2:
             trhandler.traces.remove(trace)
+            store_singleframe.append(trace)
 
     dist = trhandler.pairwise_dist()
     massdiff = trhandler.pairwise_mass()
@@ -108,12 +111,15 @@ def detect_division(cells, DISPLACEMENT=50, maxgap=4, DIVISIONMASSERR=0.15):
     # CHECK: If only one daughter is found ignore it.
     par_dau[par_dau.sum(axis=1) == 1] = False
 
+    dis_cells = trhandler.disappeared()
+    app_cells = trhandler.appeared()
+
     if par_dau.any():
         disapp_idx, app_idx = np.where(par_dau)
 
         for disi, appi in zip(disapp_idx, app_idx):
-            dis_cell = trhandler.disappeared()[disi]
-            app_cell = trhandler.appeared()[appi]
+            dis_cell = dis_cells[disi]
+            app_cell = app_cells[appi]
             app_cell.parent = dis_cell.label
             # dis_cell.nxt = app_cell
-    return convert_traces_to_storage(trhandler.traces)
+    return convert_traces_to_storage(trhandler.traces + store_singleframe)
