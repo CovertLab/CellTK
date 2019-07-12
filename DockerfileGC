@@ -1,0 +1,17 @@
+FROM python:2.7.16
+
+RUN apt-get update
+RUN apt-get install imagemagick bash git curl unzip
+
+EXPOSE 8888
+WORKDIR /home
+
+ADD celltk /home/celltk
+ADD requirements.txt /home/requirements.txt
+
+RUN pip install --upgrade cython numpy
+RUN pip install git+https://github.com/jfrelinger/cython-munkres-wrapper
+RUN pip install -r requirements.txt
+RUN pip install --upgrade numpy
+
+CMD ["/bin/bash"]
